@@ -1,0 +1,187 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>세계 시간 위젯</title>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;800&display=swap" rel="stylesheet">
+<style>
+:root{--fg:#1f2328;--muted:#6b7280;--accent:#2f6fed;--track:#e5e7eb;--field:#f3f4f6;color-scheme:light dark}
+@media (prefers-color-scheme:dark){:root{--fg:#ececec;--muted:#9a9aa0;--accent:#6ea2ff;--track:#3a3a3f;--field:#2b2b30}}
+*{box-sizing:border-box}
+html,body{margin:0;background:transparent;color:var(--fg);font-family:"Noto Sans KR",system-ui,-apple-system,sans-serif}
+body{padding:14px}
+.w{width:100%;max-width:440px;margin:0 auto}
+.list{margin:0;padding:0;list-style:none}
+.row{display:flex;align-items:center;gap:12px;padding:12px 2px;border-bottom:1px solid var(--track)}
+.row:last-child{border-bottom:0}
+.dot{width:10px;height:10px;border-radius:50%;flex:none;border:2px solid var(--accent)}
+.dot.day{background:var(--accent)}
+.name{flex:1;min-width:0}
+.name b{display:block;font-size:16px;font-weight:500}
+.name span{font-size:12px;color:var(--muted)}
+.time{font-size:30px;font-weight:800;letter-spacing:-.02em;font-variant-numeric:tabular-nums;white-space:nowrap}
+.time small{font-size:13px;font-weight:500;color:var(--muted);margin-right:6px;letter-spacing:0}
+.edit{display:inline-block;margin-top:10px;font-size:12px;color:var(--muted);opacity:.6;text-decoration:underline;cursor:pointer;background:none;border:0;font-family:inherit}
+.edit:hover,.edit:focus-visible{opacity:1}
+form{display:grid;gap:14px}
+fieldset{border:0;margin:0;padding:0}
+legend,.lab{font-size:13px;color:var(--muted);margin-bottom:6px;padding:0}
+.chips{display:flex;flex-wrap:wrap;gap:6px}
+.chips label{cursor:pointer}
+.chips input{position:absolute;opacity:0;pointer-events:none}
+.chips span{display:inline-block;padding:6px 12px;border-radius:16px;background:var(--field);border:1px solid var(--track);font-size:14px}
+.chips input:checked+span{background:var(--accent);border-color:var(--accent);color:#fff}
+.chips input:focus-visible+span{outline:2px solid var(--accent);outline-offset:2px}
+input[type=color]{font:inherit;background:var(--field);border:1px solid var(--track);border-radius:8px;padding:2px;height:38px;width:100%}
+.out{font-size:12px;word-break:break-all;color:var(--muted);background:var(--field);border-radius:8px;padding:8px 10px;min-height:36px}
+.btn{font:inherit;font-weight:500;font-size:14px;background:var(--accent);color:#fff;border:0;border-radius:8px;padding:10px 14px;cursor:pointer}
+.btn:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.prev{padding-top:14px;border-top:1px solid var(--track)}
+.hide{display:none}
+</style>
+</head>
+<body>
+<main class="w">
+  <section id="view" class="hide">
+    <ul class="list" id="vList"></ul>
+    <button class="edit" id="toSetup" type="button">설정</button>
+  </section>
+
+  <section id="setup" class="hide">
+    <form onsubmit="return false">
+      <fieldset>
+        <legend>도시 선택 (체크한 순서대로 표시돼요)</legend>
+        <div class="chips" id="chips"></div>
+      </fieldset>
+      <fieldset>
+        <legend>시간 표시</legend>
+        <div class="chips">
+          <label><input type="radio" name="h" value="24" checked><span>24시간제</span></label>
+          <label><input type="radio" name="h" value="12"><span>12시간제</span></label>
+        </div>
+      </fieldset>
+      <div>
+        <div class="lab">색상</div>
+        <input id="iColor" type="color" value="#2f6fed" aria-label="색상">
+      </div>
+      <div class="prev"><ul class="list" id="pList"></ul></div>
+      <div>
+        <div class="lab">노션에 붙여넣을 링크</div>
+        <div class="out" id="out">도시를 하나 이상 선택해 주세요.</div>
+      </div>
+      <button class="btn" id="copy" type="button">링크 복사</button>
+    </form>
+  </section>
+</main>
+
+<script>
+(function () {
+  var CITIES = {
+    seoul:['서울','Asia/Seoul'], tokyo:['도쿄','Asia/Tokyo'], beijing:['베이징','Asia/Shanghai'],
+    hongkong:['홍콩','Asia/Hong_Kong'], singapore:['싱가포르','Asia/Singapore'], bangkok:['방콕','Asia/Bangkok'],
+    delhi:['뉴델리','Asia/Kolkata'], dubai:['두바이','Asia/Dubai'], istanbul:['이스탄불','Europe/Istanbul'],
+    moscow:['모스크바','Europe/Moscow'], paris:['파리','Europe/Paris'], berlin:['베를린','Europe/Berlin'],
+    london:['런던','Europe/London'], newyork:['뉴욕','America/New_York'], chicago:['시카고','America/Chicago'],
+    denver:['덴버','America/Denver'], la:['로스앤젤레스','America/Los_Angeles'], vancouver:['밴쿠버','America/Vancouver'],
+    saopaulo:['상파울루','America/Sao_Paulo'], sydney:['시드니','Australia/Sydney'], auckland:['오클랜드','Pacific/Auckland'],
+    honolulu:['호놀룰루','Pacific/Honolulu']
+  };
+  var DEFAULT = ['seoul','newyork','london'];
+  var q = new URLSearchParams(location.search);
+  function $(id){return document.getElementById(id);}
+  function safeColor(c){return /^#?[0-9a-fA-F]{6}$/.test(c||'')?(c[0]==='#'?c:'#'+c):null;}
+
+  function parts(tz, now){
+    var f = new Intl.DateTimeFormat('en-CA',{timeZone:tz,year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',hourCycle:'h23'});
+    var o={}; f.formatToParts(now).forEach(function(p){o[p.type]=p.value;});
+    return {y:+o.year,m:+o.month,d:+o.day,h:+o.hour%24,min:+o.minute};
+  }
+  function dayKey(p){return Date.UTC(p.y,p.m-1,p.d)/86400000;}
+
+  function draw(ul, keys, hour12){
+    var now = new Date();
+    var here = parts(Intl.DateTimeFormat().resolvedOptions().timeZone, now);
+    ul.innerHTML = '';
+    keys.forEach(function(k){
+      var c = CITIES[k]; if(!c) return;
+      var p = parts(c[1], now);
+      var diff = dayKey(p)-dayKey(here);
+      var lab = diff===0?'오늘':diff===1?'내일':diff===-1?'어제':(p.m+'월 '+p.d+'일');
+      var mm = ('0'+p.min).slice(-2), t, pre='';
+      if (hour12){ pre = p.h<12?'오전':'오후'; t=((p.h%12)||12)+':'+mm; }
+      else t=('0'+p.h).slice(-2)+':'+mm;
+      var day = p.h>=6 && p.h<18;
+      var li = document.createElement('li'); li.className='row';
+      li.innerHTML = '<span class="dot'+(day?' day':'')+'" role="img" aria-label="'+(day?'낮':'밤')+'"></span>'+
+        '<div class="name"><b></b><span></span></div><div class="time"><small></small><span></span></div>';
+      li.querySelector('b').textContent = c[0];
+      li.querySelector('.name span').textContent = lab;
+      li.querySelector('small').textContent = pre;
+      li.querySelector('.time > span').textContent = t;
+      ul.appendChild(li);
+    });
+  }
+
+  var color = safeColor(q.get('color'));
+  if (color) document.documentElement.style.setProperty('--accent', color);
+  var listParam = (q.get('c')||'').split(',').filter(function(k){return CITIES[k];});
+  var hour12 = q.get('h')==='12';
+
+  if (listParam.length && !q.get('setup')) {
+    $('view').classList.remove('hide');
+    draw($('vList'), listParam, hour12);
+    setInterval(function(){draw($('vList'), listParam, hour12);}, 15000);
+    $('toSetup').onclick = function(){
+      var p = new URLSearchParams(location.search); p.set('setup','1'); location.search = p.toString();
+    };
+    return;
+  }
+
+  // 설정 화면
+  $('setup').classList.remove('hide');
+  var selected = listParam.length ? listParam.slice() : DEFAULT.slice();
+  if (color) $('iColor').value = color;
+  document.querySelector('input[name=h][value="'+(hour12?'12':'24')+'"]').checked = true;
+
+  var chips = $('chips');
+  Object.keys(CITIES).forEach(function(k){
+    var l = document.createElement('label');
+    l.innerHTML = '<input type="checkbox" value="'+k+'"><span></span>';
+    l.querySelector('span').textContent = CITIES[k][0];
+    var cb = l.querySelector('input'); cb.checked = selected.indexOf(k)>-1;
+    cb.addEventListener('change', function(){
+      var i = selected.indexOf(k);
+      if (cb.checked && i<0) selected.push(k);
+      if (!cb.checked && i>-1) selected.splice(i,1);
+      update();
+    });
+    chips.appendChild(l);
+  });
+
+  function update(){
+    var c = safeColor($('iColor').value);
+    document.documentElement.style.setProperty('--accent', c);
+    var h12 = document.querySelector('input[name=h]:checked').value==='12';
+    draw($('pList'), selected, h12);
+    if (!selected.length){ $('out').textContent='도시를 하나 이상 선택해 주세요.'; return; }
+    var p = new URLSearchParams();
+    p.set('c', selected.join(','));
+    p.set('h', h12?'12':'24');
+    p.set('color', c.slice(1));
+    var base = location.origin==='null' ? location.pathname : location.origin+location.pathname;
+    $('out').textContent = base+'?'+p.toString().replace(/%2C/g,',');
+  }
+  $('iColor').addEventListener('input', update);
+  Array.prototype.forEach.call(document.querySelectorAll('input[name=h]'), function(r){r.addEventListener('change', update);});
+  $('copy').onclick = function(){
+    var txt = $('out').textContent;
+    var done = function(){ $('copy').textContent='복사했어요'; setTimeout(function(){$('copy').textContent='링크 복사';},1500); };
+    if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(txt).then(done, function(){});
+    else { var r=document.createRange(); r.selectNodeContents($('out')); var s=getSelection(); s.removeAllRanges(); s.addRange(r); }
+  };
+  update();
+})();
+</script>
+</body>
+</html>
