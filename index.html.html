@@ -1,0 +1,163 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>D-day 위젯</title>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;800&display=swap" rel="stylesheet">
+<style>
+:root{--fg:#1f2328;--muted:#6b7280;--accent:#2f6fed;--track:#e5e7eb;--field:#f3f4f6;color-scheme:light dark}
+@media (prefers-color-scheme:dark){:root{--fg:#ececec;--muted:#9a9aa0;--accent:#6ea2ff;--track:#3a3a3f;--field:#2b2b30}}
+*{box-sizing:border-box}
+html,body{margin:0;background:transparent;color:var(--fg);font-family:"Noto Sans KR",system-ui,-apple-system,sans-serif}
+body{min-height:100vh;display:flex;align-items:center;justify-content:center;padding:16px}
+.w{width:100%;max-width:420px;text-align:center}
+.title{font-size:15px;font-weight:500;color:var(--muted);margin:0 0 4px}
+.num{font-size:clamp(56px,18vw,88px);font-weight:800;letter-spacing:-.03em;line-height:1.05;color:var(--accent);margin:0}
+.date{font-size:13px;color:var(--muted);margin:6px 0 0}
+.bar{height:6px;background:var(--track);border-radius:3px;margin:18px auto 0;overflow:hidden}
+.bar i{display:block;height:100%;background:var(--accent);border-radius:3px;width:0;transition:width .6s ease}
+.pct{font-size:12px;color:var(--muted);margin:6px 0 0}
+.edit{display:inline-block;margin-top:14px;font-size:12px;color:var(--muted);opacity:.6;text-decoration:underline;cursor:pointer;background:none;border:0;font-family:inherit}
+.edit:hover,.edit:focus-visible{opacity:1}
+form{text-align:left;display:grid;gap:12px}
+label{display:grid;gap:4px;font-size:13px;color:var(--muted)}
+input{font:inherit;font-size:15px;color:var(--fg);background:var(--field);border:1px solid var(--track);border-radius:8px;padding:9px 10px;width:100%}
+input[type=color]{padding:2px;height:38px}
+input:focus-visible,button:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.row{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.btn{font:inherit;font-weight:500;font-size:14px;background:var(--accent);color:#fff;border:0;border-radius:8px;padding:10px 14px;cursor:pointer}
+.out{font-size:12px;word-break:break-all;color:var(--muted);background:var(--field);border-radius:8px;padding:8px 10px;min-height:36px}
+.prev{margin:18px 0 6px;padding-top:18px;border-top:1px solid var(--track)}
+.hide{display:none}
+</style>
+</head>
+<body>
+<main class="w">
+  <section id="view" class="hide">
+    <p class="title" id="vTitle"></p>
+    <p class="num" id="vNum"></p>
+    <p class="date" id="vDate"></p>
+    <div class="bar hide" id="vBar"><i id="vFill"></i></div>
+    <p class="pct hide" id="vPct"></p>
+    <button class="edit" id="toSetup" type="button">설정</button>
+  </section>
+
+  <section id="setup" class="hide">
+    <form id="f" onsubmit="return false">
+      <label>이름
+        <input id="iTitle" type="text" placeholder="예: 수능, 여행, 전역" value="">
+      </label>
+      <div class="row">
+        <label>목표 날짜
+          <input id="iDate" type="date">
+        </label>
+        <label>시작 날짜 (선택)
+          <input id="iStart" type="date">
+        </label>
+      </div>
+      <label>색상
+        <input id="iColor" type="color" value="#2f6fed">
+      </label>
+      <div class="prev" id="prev"></div>
+      <label>노션에 붙여넣을 링크
+        <div class="out" id="out">날짜를 선택하면 링크가 만들어져요.</div>
+      </label>
+      <button class="btn" id="copy" type="button">링크 복사</button>
+    </form>
+  </section>
+</main>
+
+<script>
+(function () {
+  var DAYS = ['일','월','화','수','목','금','토'];
+  var q = new URLSearchParams(location.search);
+
+  function parse(s) {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(s || '')) return null;
+    var p = s.split('-');
+    return new Date(+p[0], +p[1] - 1, +p[2]);
+  }
+  function today() { var n = new Date(); return new Date(n.getFullYear(), n.getMonth(), n.getDate()); }
+  function dayDiff(a, b) { return Math.round((a - b) / 86400000); }
+  function safeColor(c) { return /^#?[0-9a-fA-F]{6}$/.test(c || '') ? (c[0] === '#' ? c : '#' + c) : null; }
+  function fmt(d) { return d.getFullYear() + '년 ' + (d.getMonth() + 1) + '월 ' + d.getDate() + '일 (' + DAYS[d.getDay()] + ')'; }
+  function $(id) { return document.getElementById(id); }
+
+  function render(target, title, start, host) {
+    var diff = dayDiff(target, today());
+    var label = diff > 0 ? 'D-' + diff : diff === 0 ? 'D-DAY' : 'D+' + Math.abs(diff);
+    host.title.textContent = title || '';
+    host.title.classList.toggle('hide', !title);
+    host.num.textContent = label;
+    host.date.textContent = fmt(target);
+    if (start && target > start) {
+      var total = dayDiff(target, start);
+      var done = Math.min(Math.max(dayDiff(today(), start), 0), total);
+      var pct = Math.round(done / total * 100);
+      host.bar.classList.remove('hide');
+      host.pct.classList.remove('hide');
+      host.fill.style.width = pct + '%';
+      host.pct.textContent = pct + '% 지났어요';
+    } else {
+      host.bar.classList.add('hide');
+      host.pct.classList.add('hide');
+    }
+  }
+
+  var target = parse(q.get('date'));
+  var color = safeColor(q.get('color'));
+  if (color) document.documentElement.style.setProperty('--accent', color);
+
+  if (target && !q.get('setup')) {
+    $('view').classList.remove('hide');
+    var host = { title: $('vTitle'), num: $('vNum'), date: $('vDate'), bar: $('vBar'), fill: $('vFill'), pct: $('vPct') };
+    render(target, q.get('title'), parse(q.get('start')), host);
+    $('toSetup').onclick = function () {
+      var p = new URLSearchParams(location.search); p.set('setup', '1');
+      location.search = p.toString();
+    };
+    // 자정이 지나면 자동 갱신
+    setInterval(function () { render(target, q.get('title'), parse(q.get('start')), host); }, 60000);
+    return;
+  }
+
+  // 설정 화면
+  $('setup').classList.remove('hide');
+  $('iTitle').value = q.get('title') || '';
+  $('iDate').value = q.get('date') || '';
+  $('iStart').value = q.get('start') || '';
+  if (color) $('iColor').value = color;
+
+  var prev = $('prev');
+  prev.innerHTML = '<p class="title" id="pT"></p><p class="num" id="pN"></p><p class="date" id="pD"></p><div class="bar hide" id="pB"><i id="pF"></i></div><p class="pct hide" id="pP"></p>';
+  prev.style.textAlign = 'center';
+  var ph = { title: $('pT'), num: $('pN'), date: $('pD'), bar: $('pB'), fill: $('pF'), pct: $('pP') };
+
+  function update() {
+    var t = parse($('iDate').value);
+    var c = safeColor($('iColor').value);
+    if (c) document.documentElement.style.setProperty('--accent', c);
+    if (!t) { prev.classList.add('hide'); $('out').textContent = '날짜를 선택하면 링크가 만들어져요.'; return; }
+    prev.classList.remove('hide');
+    render(t, $('iTitle').value, parse($('iStart').value), ph);
+    var p = new URLSearchParams();
+    if ($('iTitle').value) p.set('title', $('iTitle').value);
+    p.set('date', $('iDate').value);
+    if ($('iStart').value) p.set('start', $('iStart').value);
+    p.set('color', c.slice(1));
+    $('out').textContent = location.origin + location.pathname + '?' + p.toString();
+    if (location.origin === 'null') $('out').textContent = location.pathname + '?' + p.toString();
+  }
+  ['iTitle', 'iDate', 'iStart', 'iColor'].forEach(function (id) { $(id).addEventListener('input', update); });
+  $('copy').onclick = function () {
+    var txt = $('out').textContent;
+    var done = function () { $('copy').textContent = '복사했어요'; setTimeout(function () { $('copy').textContent = '링크 복사'; }, 1500); };
+    if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(txt).then(done, function () {});
+    else { var r = document.createRange(); r.selectNodeContents($('out')); var s = getSelection(); s.removeAllRanges(); s.addRange(r); }
+  };
+  update();
+})();
+</script>
+</body>
+</html>
